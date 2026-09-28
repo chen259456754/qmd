@@ -96,23 +96,33 @@ describe("CJK documents are searchable as character phrases", () => {
       };
 
       expect(await runQmd(["collection", "add", collectionDir, "--name", "cjk"])).toBe(0);
+
+      // Probe AFTER plain add, BEFORE rename: proves the plain-add path
+      // normalizes on its own, so the later rename sweep cannot mask a
+      // plain-add defect.
+      const probe = (): void => {
+        const db = openDatabase(dbPath);
+        try {
+          const count = (match: string): number => {
+            const row = db.prepare(`SELECT count(*) AS c FROM documents_fts WHERE documents_fts MATCH ?`).get(match) as { c: number };
+            return row.c;
+          };
+          expect(count(`"报 文"`)).toBeGreaterThan(0);
+          expect(count(`"报文"`)).toBe(0);
+        } finally {
+          db.close();
+        }
+      };
+      probe();
+
       // The IBS refresh flow does exactly this: add, then rename the
       // collection to its final name. renameCollection UPDATEs documents
       // rows directly, which fires documents_au and rewrites FTS rows from
       // the raw content doc.
       expect(await runQmd(["collection", "rename", "cjk", "cjk2"])).toBe(0);
 
-      const db = openDatabase(dbPath);
-      try {
-        const count = (match: string): number => {
-          const row = db.prepare(`SELECT count(*) AS c FROM documents_fts WHERE documents_fts MATCH ?`).get(match) as { c: number };
-          return row.c;
-        };
-        expect(count(`"报 文"`)).toBeGreaterThan(0);
-        expect(count(`"报文"`)).toBe(0);
-      } finally {
-        db.close();
-      }
+      // Probe AFTER rename: the sweep must have restored normalization.
+      probe();
     } finally {
       await rm(base, { recursive: true, force: true });
     }
