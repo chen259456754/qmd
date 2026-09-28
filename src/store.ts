@@ -3701,9 +3701,20 @@ export function removeCollection(db: Database, collectionName: string): { delete
  * Updates both YAML config and database documents table.
  */
 export function renameCollection(db: Database, oldName: string, newName: string): void {
+  // Collect the affected documents before the UPDATE: documents_au rewrites
+  // their FTS rows from the raw content doc, dropping the per-character CJK
+  // normalization (see rebuildFTSForCjkNormalization).
+  const affected = db.prepare(`SELECT id FROM documents WHERE collection = ?`)
+    .all(oldName) as Array<{ id: number }>;
+
   // Update all documents with the new collection name in database
   db.prepare(`UPDATE documents SET collection = ? WHERE collection = ?`)
     .run(newName, oldName);
+
+  // Restore normalized FTS rows for everything the rename moved.
+  for (const { id } of affected) {
+    rebuildDocumentFTS(db, id);
+  }
 
   // Rename in store_collections
   renameStoreCollection(db, oldName, newName);
